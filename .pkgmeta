@@ -1,0 +1,8 @@
+package-as: CHUD
+
+manual-changelog:
+  filename: CHANGELOG.txt
+  markup-type: plain
+
+ignore:
+  - README.md
