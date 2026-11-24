@@ -1,0 +1,26 @@
+name: Package and release
+
+# Push a version tag (e.g. `git tag v0.5.1 && git push origin v0.5.1`) to build
+# CHUD with the BigWigs packager and attach the zip plus release.json to a
+# GitHub release. CurseBreaker installs and updates from those releases.
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package and upload
+        uses: BigWigsMods/packager@v2
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
