@@ -13,7 +13,7 @@ local ADDON, ns = ...
 --                     are where nodes usually are, not nodes known to exist right now. The nearest few of each kind show.
 --   gnext     the Next Node pointer: the nearest unvisited node, drawn large. Reaching it (or Highlight.lua deciding it is gone)
 --             moves it on; visited nodes return after 10 minutes (chests 20).
---   rare      RareScanner's rare NPC spawn points, read from its installed files (never copied or shipped).
+--   rare      rare NPC spawn points and patrol paths from CHUD's own RareData.lua (RareScanner and Questie data).
 --   corpse / party   your corpse while a ghost, and party members (smoothed between the game's position updates).
 --
 -- How a bearing is found: the player's and the target's position on one map, scaled by that map's
@@ -496,8 +496,22 @@ function ns.ImportGatherData()
     if not i then i = #data.names + 1; data.names[i] = name; nameIdx[name] = i end
     return i
   end
+  -- Herbs and ore are never found inside a capital city, but some source data places them there. Those points are skipped.
+  local CITY_MAPS = { [1453] = true, [1454] = true, [1455] = true, [1456] = true, [1457] = true, [1458] = true, [1947] = true, [1954] = true }
+  local cityCache, skippedCity = {}, 0
+  local function IsCity(pm)
+    local c = cityCache[pm]
+    if c == nil then
+      local info = C_Map and C_Map.GetMapInfo and Try(C_Map.GetMapInfo, pm)
+      local cityType = Enum and Enum.UIMapType and Enum.UIMapType.City or 5
+      c = CITY_MAPS[pm] == true or (type(info) == "table" and info.mapType == cityType)
+      cityCache[pm] = c
+    end
+    return c
+  end
   local function add(kind, pm, x, y, name)
     if not (Num(pm) and Num(x) and Num(y)) or x <= 0 or y <= 0 or x >= 1 or y >= 1 then return false end
+    if kind ~= "box" and IsCity(pm) then skippedCity = skippedCity + 1; return false end
     local gk = kind .. pm
     local g = grid[gk]; if not g then g = {}; grid[gk] = g end
     local cx, cy = floor(x / CELL), floor(y / CELL)
@@ -522,6 +536,25 @@ function ns.ImportGatherData()
     return true
   end
   local report = {}
+  -- A refresh only ever adds: everything CHUD already holds is carried over first, so a source that returns nothing right now
+  -- (an addon turned off, a tracking type switched off in GatherLite) can never wipe out what an earlier import found.
+  local old = db.gdata
+  if type(old) == "table" and type(old.kinds) == "table" and type(old.names) == "table" then
+    local kept = 0
+    for kind, zones in pairs(old.kinds) do
+      if data.kinds[kind] then
+        for pm, z in pairs(zones) do
+          if type(z) == "table" and type(z.c) == "table" and type(z.n) == "table" then
+            for i = 1, #z.c do
+              local x, y = Decode(z.c[i])
+              if add(kind, pm, x, y, old.names[z.n[i]]) then kept = kept + 1 end
+            end
+          end
+        end
+      end
+    end
+    if kept > 0 then report[#report + 1] = format("Kept the %d nodes CHUD already had.", kept) end
+  end
   local gm = GM2()
   if gm then
     if DataAddonUsable() and not Loaded("GatherMate2_Data") then pcall(C_AddOns.LoadAddOn, "GatherMate2_Data") end
@@ -559,8 +592,30 @@ function ns.ImportGatherData()
   local gl = GL()
   if gl then
     local counts = { herb = 0, ore = 0, box = 0 }
+    -- GatherLite only loads a node type while that type is tracked for the current character on its minimap or world map.
+    -- A type that is off is switched on for the length of this import so its nodes load, then put back exactly as it was.
+    local function Tracked(t)
+      -- The HUD is left out: GatherLite reports it as tracked by default even while the HUD is off and loads nothing for it.
+      for _, where in ipairs({ "minimap", "worldmap" }) do
+        if Try(gl.GetNodeTracking, gl, where, t) then return true end
+      end
+      return false
+    end
+    local char = gl.db and gl.db.char
+    local manualBefore = char and char.professionTrackingManual   -- SetNodeTracking flags this; it is put back below
+    local flipped = {}
+    if gl.SetNodeTracking and gl.GetNodeTracking then
+      for typeName in pairs(GL_KINDS) do
+        if not Tracked(typeName) then
+          flipped[#flipped + 1] = typeName
+          Try(gl.SetNodeTracking, gl, "worldmap", typeName, true)
+        end
+      end
+    end
+    local raw = {}
     for typeName, kind in pairs(GL_KINDS) do
       local nodes = Try(gl.GetNodesForMap, gl, typeName)
+      raw[#raw + 1] = typeName .. " " .. (type(nodes) == "table" and #nodes or "none")
       if type(nodes) == "table" then
         for i = 1, #nodes do
           local n = nodes[i]
@@ -572,12 +627,20 @@ function ns.ImportGatherData()
         end
       end
     end
-    report[#report + 1] = format("GatherLite: %d new herbs, %d ore, %d chests", counts.herb, counts.ore, counts.box)
-    if counts.box == 0 then report[#report + 1] = "GatherLite had no chests loaded: in GatherLite's tracking menu, turn Containers on, then import again." end
+    local usePre = gl.db and gl.db.global and gl.db.global.usePredefined
+    report[#report + 1] = "GatherLite holds: " .. table.concat(raw, ", ") .. " (built-in node data " .. (usePre == false and "OFF" or "on") .. ")"
+    for _, t in ipairs(flipped) do Try(gl.SetNodeTracking, gl, "worldmap", t, false) end
+    if char then char.professionTrackingManual = manualBefore end
+    if #flipped > 0 then
+      report[#report + 1] = "GatherLite had " .. table.concat(flipped, ", ") .. " tracking off for this character. CHUD switched it on only long enough to read the nodes, then put it back."
+    end
+    report[#report + 1] = format("GatherLite: %d new herbs, %d new ore, %d new chests", counts.herb, counts.ore, counts.box)
+    if counts.herb == 0 and counts.ore == 0 then report[#report + 1] = "GatherLite gave no new herbs or ore. Your existing nodes were kept." end
     data.src[#data.src + 1] = "GatherLite"
   else
     report[#report + 1] = "GatherLite: not detected (folder name GatherLite)"
   end
+  if skippedCity > 0 then report[#report + 1] = format("Skipped %d herb and ore points that were placed inside cities.", skippedCity) end
   local total = data.counts.herb + data.counts.ore + data.counts.box
   if total == 0 then
     report[#report + 1] = "Nothing was imported. Your existing CHUD data was left as it was."
@@ -589,6 +652,12 @@ function ns.ImportGatherData()
   report[#report + 1] = format("CHUD now holds %d herbs, %d ore and %d chests.", data.counts.herb, data.counts.ore, data.counts.box)
   data.report = table.concat(report, "\n")
   return report
+end
+-- Runs the import and never fails silently: a Lua error becomes a line of text in the report instead of nothing happening.
+function ns.ImportGatherDataSafe()
+  local ok, res = pcall(ns.ImportGatherData)
+  if ok and type(res) == "table" then return res end
+  return { "Import failed: " .. tostring(res) }
 end
 -- Deletes CHUD's imported copy of the herb, ore and chest data (the other addons' own data is never touched) and clears the bar.
 -- Nothing imports by itself: the setup tour (/chud install) and the Refresh Gathering Data button are the only ways in.
@@ -636,10 +705,10 @@ local function NextNode(pm, list, prev)
   targets[#targets + 1] = gnextT
 end
 
--- RareScanner rares ---------------------------------------------------------------------------
--- RareScanner keeps its rare NPC table private, but CHUD.toc also lists that one file from RareScanner's own folder, so the
--- game runs it with CHUD's namespace and the table lands in ns.NPC_INFO. Nothing is copied or shipped: CHUD reads the file the
--- player already has installed, and it follows RareScanner's updates. Killed rares are read from RareScanner's saved state.
+-- Rare NPCs ------------------------------------------------------------------------------------
+-- Spawn points and patrol paths come from CHUD's own RareData.lua (merged from RareScanner and Questie data, with permission;
+-- see the credits in README.md). Nothing is read from another addon's files. When RareScanner is enabled, rares it has recorded
+-- as killed are hidden until their respawn time. CHUD also records kills itself (your target dying, loot windows and kill XP messages).
 local function RSInstalled()
   if not (C_AddOns and C_AddOns.GetAddOnInfo) then return false end
   local ok, name = pcall(C_AddOns.GetAddOnInfo, "RareScanner")
@@ -650,22 +719,46 @@ local function RSInstalled()
   end
   return true
 end
--- RareScanner's rare NPC table when the addon is enabled and its file was loaded, else nil.
-local function RSInfo() return RSInstalled() and type(ns.NPC_INFO) == "table" and ns.NPC_INFO or nil end
 local rsCount
--- installed, readable, number of rares with a known position
+-- installed (RareScanner kill tracking available), data present, number of rares in CHUD's own table
 function ns.RareStatus()
-  local inst = RSInstalled()
-  local info = inst and type(ns.NPC_INFO) == "table" and ns.NPC_INFO or nil
+  local info = ns.RareData
   if info and not rsCount then
     rsCount = 0
-    for _, n in pairs(info) do if type(n) == "table" and n.x and n.zoneID and n.zoneID > 0 and n.zoneID < 100000 then rsCount = rsCount + 1 end end
+    for _, m in pairs(info) do for _ in pairs(m) do rsCount = rsCount + 1 end end
   end
-  return inst, info ~= nil, rsCount or 0
+  return RSInstalled(), info ~= nil, rsCount or 0
 end
-local rsIndex, rsNames = {}, {}
--- True while RareScanner has this rare recorded as killed and it has not yet respawned.
+local rsIndex = {}
+-- CHUD's own kill record: { [npcID] = time it comes back }. The respawn time is a guess (no published figure).
+local RARE_RESPAWN = 1800
+local rareIds
+-- Records a rare as killed, by NPC id or by name (looked up on the map you are on). Unknown NPCs are ignored.
+function ns.NoteRareKill(id, name)
+  local db, data = ns.db, ns.RareData
+  if not (db and data) then return end
+  if not id and type(name) == "string" and name ~= "" then
+    local pm = C_Map and C_Map.GetBestMapForUnit and Try(C_Map.GetBestMapForUnit, "player")
+    local m = pm and data[pm]
+    if m then for nid, n in pairs(m) do if n[2] == name then id = nid; break end end end
+  end
+  if not id then return end
+  if not rareIds then
+    rareIds = {}
+    for _, m in pairs(data) do for nid in pairs(m) do rareIds[nid] = true end end
+  end
+  if not rareIds[id] then return end
+  db.rareKilled = db.rareKilled or {}
+  db.rareKilled[id] = time() + RARE_RESPAWN
+  needRebuild = true
+end
+-- True while this rare is recorded as killed (by CHUD, or by RareScanner when it is installed) and has not yet respawned.
 local function RSKilled(id)
+  local own = ns.db and ns.db.rareKilled and ns.db.rareKilled[id]
+  if own then
+    if own > time() then return true end
+    ns.db.rareKilled[id] = nil
+  end
   local AA = LibStub and LibStub("AceAddon-3.0", true)
   local rs = AA and AA:GetAddon("RareScanner", true)
   local k = rs and rs.db and rs.db.char and rs.db.char.rares_killed
@@ -674,51 +767,45 @@ local function RSKilled(id)
   if type(v) == "number" and v > 0 and v < time() then return false end   -- its respawn time has passed
   return true
 end
--- A rare NPC's name from Questie's database (cached), or nil.
-local function RareName(id)
-  local c = rsNames[id]
-  if c then return c end
-  local L = _G.QuestieLoader
-  local Q = L and Try(L.ImportModule, L, "QuestieDB")
-  local nm = Q and Q.QueryNPCSingle and Try(Q.QueryNPCSingle, id, "name")
-  if type(nm) == "string" and nm ~= "" then rsNames[id] = nm; return nm end
-end
--- The rare NPC spawn points on a map, indexed once per map and cached.
+-- The rare NPCs on a map, indexed once per map and cached. Each rare keeps all its points (a patrol path can have a dozen) and is
+-- drawn as one marker at the point nearest to you.
 local function RSList(pm)
   local list = rsIndex[pm]
   if list then return list end
-  local info = RSInfo()
-  if not info then return nil end
+  local map = ns.RareData and ns.RareData[pm]
+  if not map then return nil end
   list = {}
-  for id, n in pairs(info) do
-    if type(n) == "table" and n.zoneID == pm and n.x then
-      local pts = {}
-      if type(n.overlay) == "table" then
-        for _, str in ipairs(n.overlay) do
-          local a, b = tostring(str):match("^(%d+)-(%d+)$")
-          if a then pts[#pts + 1] = { a / 10000, b / 10000 } end
-        end
-      end
-      if #pts == 0 then pts[1] = { n.x / 10000, n.y / 10000 } end
-      for i, p in ipairs(pts) do
-        list[#list + 1] = { kind = "rare", mapID = pm, x = p[1], y = p[2], key = "rs:" .. id .. ":" .. i, group = "rs:" .. id, npcID = id, level = n.level }
-      end
+  for id, n in pairs(map) do
+    local pts = n[3]
+    if #pts >= 2 then
+      list[#list + 1] = { kind = "rare", mapID = pm, x = pts[1] / 10000, y = pts[2] / 10000, key = "rs:" .. id, group = "rs:" .. id,
+        npcID = id, level = n[1] > 0 and n[1] or nil, label = n[2] ~= "" and n[2] or "Rare NPC", pts = pts }
     end
   end
   rsIndex[pm] = list
   return list
 end
--- Adds RareScanner's rare NPC spawn points for this map, skipping rares you have killed.
+-- Adds one marker per known rare NPC on this map (at the patrol point nearest you), skipping rares you have killed.
 local function AddRares(pm)
   local db = ns.db
   if not (db and On("rare") and db.mk_rsData ~= false) then return end
   local list = RSList(pm)
   if not list then return end
+  local px, py = XY(Try(C_Map.GetPlayerMapPosition, pm, "player"))
   for i = 1, #list do
     local t = list[i]
     if not RSKilled(t.npcID) then
-      t.label = RareName(t.npcID) or "Rare NPC"
-      t.sub = t.level and ("Level " .. t.level .. " - from RareScanner") or "From RareScanner"
+      local pts = t.pts
+      if px and #pts > 2 then
+        local best, bi = nil, 1
+        for k = 1, #pts - 1, 2 do
+          local dx, dy = pts[k] / 10000 - px, pts[k + 1] / 10000 - py
+          local d = dx * dx + dy * dy
+          if not best or d < best then best, bi = d, k end
+        end
+        t.x, t.y = pts[bi] / 10000, pts[bi + 1] / 10000
+      end
+      t.sub = t.level and ("Level " .. t.level .. " rare") or "Rare"
       targets[#targets + 1] = t
     end
   end
@@ -1741,12 +1828,36 @@ for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDO
   "GROUP_ROSTER_UPDATE", "PLAYER_ROLES_ASSIGNED", "PARTY_MEMBER_ENABLE", "PARTY_MEMBER_DISABLE" }) do
   pcall(ev.RegisterEvent, ev, e)   -- an event this client does not have is simply skipped
 end
+pcall(ev.RegisterEvent, ev, "LOOT_OPENED")   -- rare kills: the corpse you loot (the combat log is closed to addons on this client)
+pcall(ev.RegisterUnitEvent, ev, "UNIT_HEALTH", "target")   -- rare kills: your target dying
 pcall(ev.RegisterUnitEvent, ev, "UNIT_SPELLCAST_SENT", "player")
 pcall(ev.RegisterUnitEvent, ev, "UNIT_SPELLCAST_SUCCEEDED", "player")
 pcall(ev.RegisterUnitEvent, ev, "UNIT_SPELLCAST_INTERRUPTED", "player")
 pcall(ev.RegisterUnitEvent, ev, "UNIT_SPELLCAST_FAILED", "player")
 
 ev:SetScript("OnEvent", function(_, event, ...)
+  if event == "UNIT_HEALTH" then
+    pcall(function()   -- the game may hide these values from addons; a refusal here is simply skipped
+      if UnitIsDead and UnitIsDead("target") then
+        local g = UnitGUID("target")
+        if type(g) == "string" and not (issecretvalue and issecretvalue(g)) then
+          local id = tonumber(select(6, strsplit("-", g)))
+          if id then ns.NoteRareKill(id) end
+        end
+      end
+    end)
+    return
+  end
+  if event == "LOOT_OPENED" then
+    for slot = 1, (GetNumLootItems and GetNumLootItems() or 0) do
+      local g = GetLootSourceInfo and GetLootSourceInfo(slot)
+      if type(g) == "string" and not (issecretvalue and issecretvalue(g)) then
+        local id = tonumber(select(6, strsplit("-", g)))
+        if id then ns.NoteRareKill(id) end
+      end
+    end
+    return
+  end
   if event == "UNIT_SPELLCAST_SENT" then
     local _, target, _, spellID = ...
     local name = Num(spellID) and SpellName(spellID) or nil
@@ -1776,7 +1887,7 @@ ev:SetScript("OnUpdate", ns.Perf("Markers", function(_, elapsed)
   local gliding = SmoothParty(elapsed)
   if acc < TICK then
     -- Between full ticks: keep close-up icons smooth, at the chosen rate.
-    if accFast >= 1 / max(ns.db.mk_rate or 12, 1) then accFast = 0; FastTick(gliding) end
+    if accFast >= 1 / max(ns.db.mk_rate or 24, 1) then accFast = 0; FastTick(gliding) end
     return
   end
   acc, accFast = 0, 0
@@ -2011,14 +2122,6 @@ function ns.Probe()
     end
     print("  GatherLite:GetNodes() ->", type(nodes), "| top-level groups", #kinds > 0 and table.concat(kinds, " ") or "none")
     call("GatherLite:GetNodeObject(324)", function() local o = GL:GetNodeObject(324); return o and (o.name or o.type) end)
-  end
-  if type(_G.RareScanner) == "table" then
-    local keys = {}
-    for k, v in pairs(_G.RareScanner) do if type(v) == "function" then keys[#keys + 1] = tostring(k) end end
-    table.sort(keys)
-    print("  RareScanner global functions:", #keys > 0 and table.concat(keys, " ", 1, math.min(#keys, 12)) or "none")
-  else
-    print("  RareScanner global: not exposed (data is private to the addon)")
   end
   print("CHUD probe done. Copy the output and paste it back.")
 end

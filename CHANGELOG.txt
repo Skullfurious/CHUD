@@ -1,3 +1,27 @@
+CHUD 1.0.1
+
+RareScanner loading warning. CHUD no longer lists a file from RareScanner in its own load list, which made the game print "Error loading RareScanner/Tables/NpcInfoTables.lua" for anyone without RareScanner. Rare NPC spawn points and patrol paths are now built into CHUD in a single data file (RareData.lua), merged from the RareScanner and Questie databases with permission. No other addon is needed for rare markers. CHUD records your rare kills itself and hides those rares for 30 minutes. RareScanner is not needed; its kill records are honored too when it is installed.
+
+Taint. CHUD no longer asks the game to rebuild its status bars when the default XP bar is shown again. Calling that from an addon taints the game's code and can block protected actions such as entering Edit Mode.
+
+XP edge wave. The bright line at the end of the XP fill now ripples like the surface of a liquid. It has an XP Edge Wave checkbox in the Experience Bar settings, and /chud xpwave still toggles it. The wave is saved with themes, and every built-in theme has it on.
+
+Icon Update Rate. The default is now 24 updates per second (was 12), for smoother icons while you move. Saved settings keep whatever value they have.
+
+Simpler right-click menu. The menu now groups its options under Quests & Party, Rares & Treasures, Gathering, Highlight Node and Screen Marker (beta), with Data Sources and Refresh Gathering Data at the bottom. Everything else (Questie, display, icon style, party, fading, Delete Imported Gathering Data) sits behind an Advanced button, and the choice is remembered. Saved themes are listed above the built-in ones.
+
+Theme import and export. Export shows a copyable code for the selected theme or your current look. Import adds a theme from a code into your Saved list. Codes are read by CHUD's own parser, only known theme settings are accepted, and fonts are not imported.
+
+Known Spawns. The extra checkbox in Data Sources is renamed and explained: it adds the built-in rare spawn points and patrol paths to the game's own live rare markers.
+
+Rare patrol paths. A rare with a long patrol path (14 points for the Sewer Beast) drew one icon per point. It is now one marker at the point nearest you.
+
+Herbs and ore inside cities. Some source data places herb and ore points inside capital cities, which showed phantom icons on the bar. A refresh now skips them. Chests are unaffected.
+
+Refresh Gathering Data and GatherLite tracking. GatherLite only loads herbs, ore or chests while that type is tracked for your character, so a refresh could come back empty. CHUD now switches an untracked type on just long enough to read it and puts it back as it was. A refresh also only adds nodes now. It carries over everything CHUD already holds, so a source that returns nothing at that moment no longer wipes your herbs and ore. Delete Imported Data is the way to clear them.
+
+Highlight Node and NPC nameplates. Highlight Node stays on by default. It uses the game's soft interact targeting, which also puts a nameplate on nearby NPCs you can interact with. CHUD now says so on the setup tour's data page, when you turn the option on, and in its tooltip. Turn it off to stop the nameplates; your own game settings are put back.
+
 CHUD 1.0
 
 Gathering nodes. Herbs, ore and chests now come from GatherLite (recommended, it has all three) or GatherMate2 with GatherMate2_Data (herbs and ore), plus the spots you gather yourself. CHUD imports them into its own saved copy only when you ask (in the setup tour or with the Refresh Gathering Data button), so it keeps working if you remove them later. Delete Imported Data erases the copy. The nearest 8 of each kind show on the bar, bigger as you get closer. If both addons are on, the menu suggests turning GatherMate2 off because they overlap.
@@ -8,7 +32,7 @@ Off-bar pointer. When the Next Node is outside the bar it stays pinned to the ed
 
 Highlight Node. Close to the pointer, CHUD draws brackets and a ring on the real herb, vein or chest using the game's own interact targeting. If you are facing the spot and nothing is there, a short "Node Not Here" effect plays and the pointer moves on. It changes a few game targeting settings, only the ones that differ, and gives them back when you turn it off or log out.
 
-Rare NPCs. Rare spawn points are read from RareScanner when it is installed and enabled. CHUD never copies or ships its data, and rares you have killed stay hidden until they respawn.
+Rare NPCs. About 420 rare NPCs with spawn points and patrol paths are built into CHUD. CHUD records your rare kills and hides those rares for 30 minutes.
 
 Party and corpse. Party members get a role or class icon on the bar, glide smoothly between the game's position updates, and are hidden while offline. Your corpse is marked while you are a ghost.
 

@@ -305,6 +305,13 @@ C_Timer.NewTicker(0.1, function()
 end)
 
 -- The marker menu calls this when the option changes.
+-- The warning shown when Highlight Node is turned on, and on the setup tour's data page.
+ns.HL_WARN = "Highlight Node uses the game's soft interact targeting, which also puts a nameplate on nearby NPCs you can interact with. Turn it off to stop that; your own game settings are put back."
+-- Tells the player about the NPC nameplate side effect in chat and on screen.
+function ns.HighlightWarn()
+  print("|cffd9bf4dCHUD:|r |cffffb347" .. ns.HL_WARN .. "|r")
+  if UIErrorsFrame and UIErrorsFrame.AddMessage then UIErrorsFrame:AddMessage("CHUD: Highlight Node also shows nameplates on nearby NPCs.", 1, 0.7, 0.3) end
+end
 function ns.HighlightChanged()
   if Enabled() then Apply() else Restore(); Hide() end
   Evaluate()

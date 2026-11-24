@@ -27,11 +27,15 @@ bar focuses that quest. Questie options are in the right-click menu. Without Que
 
 ## Gathering and rare data
 
-CHUD reads other addons you already have and never changes them.
+CHUD reads gathering data from other addons you already have and never changes them.
 
 - **GatherLite** (recommended) supplies herb, ore and chest positions. **GatherMate2** with GatherMate2_Data also works for herbs and ore. CHUD keeps its own imported copy, and having both on is not needed, so you may want to turn GatherMate2 off.
-- **RareScanner** supplies rare NPC spawn points. CHUD reads its installed files each time you play, so it follows RareScanner's updates. Restart the game once after installing it.
+- **Rare NPCs** are built into CHUD (about 420 rares with spawn points and patrol paths), so nothing else is needed. CHUD records your rare kills itself and hides those rares for 30 minutes. **RareScanner** is not needed; its kill records are honored too when it is installed.
 - The Next Node pointer leads you to the nearest unvisited node, and Highlight Node lights up the real object when you arrive. It adjusts a few game targeting settings and gives them back when switched off.
+
+## Credits
+
+The rare NPC data in `RareData.lua` is merged from the RareScanner addon (spawn points and patrol paths) and the Questie database (names, levels and additional spawns). Both projects gave permission for their data to be included. Thanks to their authors and contributors.
 
 ## Status
 

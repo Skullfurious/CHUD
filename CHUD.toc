@@ -4,12 +4,12 @@
 ## Author: skullfurious
 ## X-License: MIT
 ## IconTexture: Interface\AddOns\CHUD\icon.tga
-## Version: 1.0
+## Version: 1.0.1
 ## SavedVariables: CHUDDB, CHUDLog
 
-..\RareScanner\Tables\NpcInfoTables.lua
 CHUD.lua
 Themes.lua
+RareData.lua
 Markers.lua
 Highlight.lua
 Fade.lua

@@ -40,7 +40,7 @@ local function BuildWelcome(p)
   local CARDS = {
     { "1", "A look", "Pick a theme. The bar on your screen changes as you choose." },
     { "2", "Markers", "Choose what it points to: quests, party, herbs, ore, chests." },
-    { "3", "Data", "Connect GatherLite or RareScanner so the markers have something to show." },
+    { "3", "Data", "Connect GatherLite so the gathering markers have something to show. Rare NPCs are built in." },
     { "4", "Fading", "Optionally hide the bar until you need it." },
   }
   local cw, gap = 120, 10
@@ -161,7 +161,7 @@ local function BuildData(p)
   end
   Text(p, "1.  CHUD looks for GatherLite (best: herbs, ore and chests) or GatherMate2 with GatherMate2_Data (herbs and ore).\n" ..
     "2.  It copies the node positions once into its own saved data, so the markers keep working even if you later remove those addons. This takes a moment.\n" ..
-    "3.  Rare NPC spawn points are read from RareScanner each time you play, and are never copied.",
+    "3.  Rare NPC spawn points are built into CHUD, so there is nothing to import. CHUD hides rares you kill for 30 minutes.",
     24, -150, 500, { 0.85, 0.85, 0.85 }, "GameFontHighlightSmall")
   local result = Text(p, "", 246, -266, 280, nil, "GameFontHighlightSmall")
   local note = Text(p, "", 24, -306, 500, ORANGE, "GameFontHighlightSmall")
@@ -177,7 +177,7 @@ local function BuildData(p)
     Row(1, "GatherLite", s.gl and "found" or "not found", s.gl)
     Row(2, "GatherMate2 + GatherMate2_Data", (s.gm2 and s.data) and "found" or s.gm2 and "found, GatherMate2_Data missing" or "not found", s.gm2 and s.data)
     local inst, readable, n = ns.RareStatus()
-    Row(3, "RareScanner", not inst and "not found" or readable and format("found, %d rares", n) or "found, restart the game once to read it", inst and readable)
+    Row(3, "Rare NPC data (built in)", readable and format("%d rares", n) or "missing", readable)
     if s.gl or s.gm2 then btn:Enable() else btn:Disable() end
     local g = s.own
     if g and g.counts then
@@ -196,23 +196,28 @@ local function BuildData(p)
   btn = UI.Button(p, "Import Gathering Data", 24, -262, 210, function()
     btn:Disable(); result:SetText("Reading nodes..."); result:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
     C_Timer.After(0.15, function()   -- a moment for the message to show before the import runs
-      pcall(ns.ImportGatherData)
+      for _, line in ipairs(ns.ImportGatherDataSafe()) do print("|cffd9bf4dCHUD:|r " .. line) end
       Refresh()
     end)
   end)
-  p.OnOpen = Refresh
+  -- Highlight Node: on by default, with its side effect stated up front.
+  local hl = UI.Check(p, "Highlight Node (lights up the real herb, ore or chest when you arrive)", 24, -338,
+    function() return ns.db.mk_hl ~= false end, function(v) ns.db.mk_hl = v; if ns.HighlightChanged then ns.HighlightChanged() end end)
+  hl:SetHitRectInsets(0, -440, 0, 0)
+  Text(p, "Warning: " .. (ns.HL_WARN or ""), 48, -362, 480, ORANGE, "GameFontHighlightSmall")
+  p.OnOpen = function() Refresh(); hl:SetChecked(ns.db.mk_hl ~= false) end
 end
 
 -- 5. Fading
 local function BuildFade(p)
-  PageTitle(p, "Fade when you don't need it", "Optional. You can change this later under More Options, Fading.")
+  PageTitle(p, "Fade when you don't need it", "Optional. You can change this later under Advanced, Fading.")
   local always = UI.Check(p, "Always visible", 24, -92, function() return not ns.db.fadeOn end, function(v) ns.db.fadeOn = not v end)
   always:SetHitRectInsets(0, -300, 0, 0)
   Text(p, "The bar stays up all the time. This is the default.", 48, -114, 460, GREY, "GameFontHighlightSmall")
   local fade = UI.Check(p, "Fade out when idle", 24, -150, function() return ns.db.fadeOn == true end, function(v) ns.db.fadeOn = v end)
   fade:SetHitRectInsets(0, -300, 0, 0)
   Text(p, "The bar fades away after a moment and comes back when you open the map or quest log, hover the bar or the minimap, or die. " ..
-    "Combat, running and autorun can be added to that list in More Options, each on its own.", 48, -172, 460, GREY, "GameFontHighlightSmall")
+    "Combat, running and autorun can be added to that list in Advanced, each on its own.", 48, -172, 460, GREY, "GameFontHighlightSmall")
   Text(p, "Fading is handy with addons that hide your interface while you run. It also has a Master Opacity slider for a dimmer bar at all times.",
     24, -238, 500, { 0.85, 0.85, 0.85 }, "GameFontHighlightSmall")
 end

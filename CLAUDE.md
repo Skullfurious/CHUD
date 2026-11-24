@@ -12,12 +12,14 @@ A compass bar addon for World of Warcraft Forever (Interface 16001). Single auth
    - Built-in theme changes must never overwrite a user's saved theme of the same name.
    - Preferences that are not part of a look stay out of themes (`EXCLUDE` in `Themes.lua`: lock state, width, CPU setting, `mk_native`, and similar). Do not put them back.
    - Any change touching themes, saved variables or resets needs a check that an existing saved theme survives it.
-2. **Only change addons the user created.** Other addons are read, never modified. CHUD never writes to GatherLite, GatherMate2, RareScanner or Questie, and never copies or ships their data. RareScanner is read through the TOC file list.
-3. **Do not push to GitHub, tag or create releases unless the user says so.**
+2. **Only change addons the user created.** Other addons are read, never modified. CHUD never writes to GatherLite, GatherMate2, RareScanner or Questie. Gathering data is imported by the player from the installed addon. The one exception: during an import CHUD may switch a GatherLite tracking type on and must restore it exactly afterwards (GatherLite loads a type only while it is tracked). Rare NPC data and kill tracking are built into `RareData.lua` (merged from RareScanner and Questie with permission, credited in README.md).
+3. **`CHUD.toc` never lists a file from another addon, and CHUD ships as one addon with no companion addons.** A file from another addon causes a loading warning for anyone who does not have it. Data that is needed goes into CHUD itself.
+   Forever also refuses addons that register for `COMBAT_LOG_EVENT_UNFILTERED` (the game shows a "blocked from an action" popup at login). Use target, loot and chat events instead. CHUD prints any blocked action of its own in chat (`ADDON_ACTION_BLOCKED` and `ADDON_ACTION_FORBIDDEN`).
+4. **Do not push to GitHub, tag or create releases unless the user says so.**
 
 ## Where things live
 
-Load order is in `CHUD.toc`: RareScanner table line, `CHUD.lua`, `Themes.lua`, `Markers.lua`, `Highlight.lua`, `Fade.lua`, `Tooltip.lua`, `Settings.lua`, `Install.lua`.
+Load order is in `CHUD.toc`: `CHUD.lua`, `Themes.lua`, `RareData.lua`, `Markers.lua`, `Highlight.lua`, `Fade.lua`, `Tooltip.lua`, `Settings.lua`, `Install.lua`.
 
 - `CHUD.lua`: bar, compass, XP fill and tooltip hook, defaults (`ns.defaults`), saved-variable migration, `ns.Reset`, slash commands, default Blizzard XP bar hiding.
 - `Themes.lua`: built-in themes, Daylight, theme keys, apply/match/save.
@@ -27,6 +29,8 @@ Load order is in `CHUD.toc`: RareScanner table line, `CHUD.lua`, `Themes.lua`, `
 - `Tooltip.lua`: CHUD's own XP tooltip.
 - `Settings.lua`: settings page, marker menu, shared widgets (`ns.UI`).
 - `Install.lua`: setup tour.
+- `RareData.lua`: generated rare NPC table (`ns.RareData[uiMapID][npcID] = {level, name, {x,y,...}}`, coordinates are map percent x 100). Do not edit by hand.
+- Never call the game's own UI functions (for example status bar managers) from addon code: it taints the game's code and blocks protected actions such as Edit Mode.
 
 ## Code standards
 

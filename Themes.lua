@@ -1,4 +1,5 @@
 local ADDON, ns = ...
+local floor = math.floor
 
 -- A theme is a snapshot of the "look": every color and layout/behavior key, except things
 -- that are not part of a look (position, width, lock state, the CPU setting, the themes list itself).
@@ -323,6 +324,137 @@ function ns.DeleteTheme(name)
   if ns.db.themes then ns.db.themes[name] = nil end
   if ns.OnSettingsChanged then ns.OnSettingsChanged() end
 end
+
+-- Sharing themes -----------------------------------------------------------------------------------------
+-- A theme code is text: "CHUD-THEME:1:" followed by a base64 copy of the theme. It is read back with a small parser of our own
+-- (nothing in a pasted code is ever run as Lua), only the known theme settings are accepted, and every value is checked
+-- against the type of the setting's default.
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64IDX = {}
+for i = 1, #B64 do B64IDX[B64:sub(i, i)] = i - 1 end
+local function B64Encode(s)
+  local out = {}
+  for i = 1, #s, 3 do
+    local a, b, c = s:byte(i, i + 2)
+    local n = a * 65536 + (b or 0) * 256 + (c or 0)
+    local c1, c2, c3, c4 = floor(n / 262144) % 64, floor(n / 4096) % 64, floor(n / 64) % 64, n % 64
+    out[#out + 1] = B64:sub(c1 + 1, c1 + 1) .. B64:sub(c2 + 1, c2 + 1) ..
+      (b and B64:sub(c3 + 1, c3 + 1) or "=") .. (c and B64:sub(c4 + 1, c4 + 1) or "=")
+  end
+  return table.concat(out)
+end
+local function B64Decode(s)
+  s = s:gsub("[^%w%+/=]", "")
+  local out = {}
+  for i = 1, #s, 4 do
+    local c1, c2, c3, c4 = s:sub(i, i), s:sub(i + 1, i + 1), s:sub(i + 2, i + 2), s:sub(i + 3, i + 3)
+    local v1, v2 = B64IDX[c1], B64IDX[c2]
+    if not (v1 and v2) then return nil end
+    local v3, v4 = B64IDX[c3], B64IDX[c4]
+    local n = v1 * 262144 + v2 * 4096 + (v3 or 0) * 64 + (v4 or 0)
+    out[#out + 1] = string.char(floor(n / 65536) % 256)
+    if v3 then out[#out + 1] = string.char(floor(n / 256) % 256) end
+    if v4 then out[#out + 1] = string.char(n % 256) end
+  end
+  return table.concat(out)
+end
+-- Values are written as: n<number>; b1 or b0; s<length>:<text>; t<count>; followed by that many key/value pairs.
+local function Ser(v, out)
+  local t = type(v)
+  if t == "number" then out[#out + 1] = "n" .. string.format("%.6g", v) .. ";"
+  elseif t == "boolean" then out[#out + 1] = v and "b1" or "b0"
+  elseif t == "string" then out[#out + 1] = "s" .. #v .. ":" .. v
+  elseif t == "table" then
+    local keys = {}
+    for k in pairs(v) do keys[#keys + 1] = k end
+    table.sort(keys, function(x, y) return tostring(x) < tostring(y) end)
+    out[#out + 1] = "t" .. #keys .. ";"
+    for _, k in ipairs(keys) do Ser(k, out); Ser(v[k], out) end
+  end
+end
+-- Reads one value starting at position i. Returns the value and the next position, or nil on any malformed input.
+local function Des(s, i, depth)
+  if depth > 4 then return nil end
+  local c = s:sub(i, i)
+  if c == "n" then
+    local num, e = s:match("^([%-%+%d%.eE]+);()", i + 1)
+    num = tonumber(num)
+    if not num or num ~= num or num == math.huge or num == -math.huge then return nil end
+    return num, e
+  elseif c == "b" then
+    local d = s:sub(i + 1, i + 1)
+    if d == "1" then return true, i + 2 elseif d == "0" then return false, i + 2 end
+    return nil
+  elseif c == "s" then
+    local len, e = s:match("^(%d+):()", i + 1)
+    len = tonumber(len)
+    if not len or len > 200 or e + len - 1 > #s then return nil end
+    return s:sub(e, e + len - 1), e + len
+  elseif c == "t" then
+    local cnt, e = s:match("^(%d+);()", i + 1)
+    cnt = tonumber(cnt)
+    if not cnt or cnt > 200 then return nil end
+    local tbl = {}
+    for _ = 1, cnt do
+      local k, v
+      k, e = Des(s, e, depth + 1); if k == nil then return nil end
+      v, e = Des(s, e, depth + 1); if v == nil then return nil end
+      tbl[k] = v
+    end
+    return tbl, e
+  end
+  return nil
+end
+local SKIP_ON_IMPORT = { fontName = true, fontPath = true }   -- another player's fonts may not exist here
+local PREFIX = "CHUD-THEME:1:"
+
+-- The shareable text for a built-in or saved theme (by name), or for the current look when name is nil.
+function ns.ExportTheme(name)
+  local data = name and ns.GetThemeData(name) or ns.SnapshotTheme()
+  local out = {}
+  Ser({ name = name or "Custom", data = data }, out)
+  return PREFIX .. B64Encode(table.concat(out))
+end
+
+-- Reads a theme code and saves it as a new theme. Returns the saved name, or nil and a message.
+function ns.ImportTheme(code)
+  if type(code) ~= "string" then return nil, "Paste a theme code first." end
+  code = code:gsub("%s", "")
+  if code:sub(1, #PREFIX) ~= PREFIX then return nil, "That is not a CHUD theme code." end
+  local raw = B64Decode(code:sub(#PREFIX + 1))
+  if not raw or raw == "" then return nil, "The code is damaged or cut short." end
+  local payload = Des(raw, 1, 0)
+  if type(payload) ~= "table" or type(payload.data) ~= "table" then return nil, "The code is damaged or cut short." end
+  local clean, count = {}, 0
+  for _, k in ipairs(KEYS) do
+    local v, dflt = payload.data[k], ns.defaults[k]
+    if v ~= nil and not SKIP_ON_IMPORT[k] and type(v) == type(dflt) then
+      if type(dflt) == "table" then
+        local t, good = {}, true
+        for i = 1, #dflt do
+          if type(v[i]) == "number" then t[i] = v[i] else good = false end
+        end
+        if good then clean[k] = t; count = count + 1 end
+      elseif type(v) ~= "string" or #v <= 64 then
+        clean[k] = v; count = count + 1
+      end
+    end
+  end
+  if count < 5 then return nil, "That code has no usable theme settings." end
+  local name = type(payload.name) == "string" and payload.name:gsub("[%c]", ""):gsub("^%s+", ""):gsub("%s+$", "") or ""
+  if name == "" then name = "Imported" end
+  name = name:sub(1, 24)
+  ns.db.themes = ns.db.themes or {}
+  local base, n = name, 1
+  while BUILTIN[name] or ns.db.themes[name] do
+    n = n + 1
+    name = base:sub(1, 20) .. " (" .. n .. ")"
+  end
+  ns.db.themes[name] = clean
+  if ns.OnSettingsChanged then ns.OnSettingsChanged() end
+  return name
+end
+ns._ThemeCodec = { Ser = Ser, Des = Des, B64Encode = B64Encode, B64Decode = B64Decode }
 
 -- Keeps Daylight in step with the game clock: when the half-hour has changed, the new colors are applied. The first check
 -- runs right away (so login catches up), then one every 30 real seconds.

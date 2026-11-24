@@ -38,6 +38,7 @@ ns.defaults = {
   xpFillMode = "left",         -- "left" (left to right), "edges" (both edges inward) or "center" (middle outward)
   xpFillStyle = "fadeCenter",  -- "fadeCenter", "fadeBottom", "fadeTop", "band" or "full"
   xpFillStrength = 0.30,       -- opacity multiplier for the wash and its leading edge
+  xpWave = true,               -- the leading edge ripples like liquid; /chud xpwave turns it off and on
   -- Markers (the menu that opens when you click the compass)
   mk_tracked = true,       -- tracked quest / waypoint
   mk_objectives = true,    -- quest objectives and turn-ins on this map
@@ -59,7 +60,7 @@ ns.defaults = {
   mk_qRange = 600,         -- yards: Questie icons farther than this are hidden (the focused quest ignores it)
   mk_qFocusOnly = false,   -- show Questie icons only for the focused quest
   mk_areaGlow = true,      -- the focused quest's icon glows while you are inside that quest's area (if the client reports it)
-  mk_rate = 12,            -- updates per second for close-up icons while you move (higher = smoother, a little more CPU)
+  mk_rate = 24,            -- updates per second for close-up icons while you move (higher = smoother, a little more CPU)
   mk_giverRange = 300,     -- yards over which quest giver icons shrink and fade
   mk_objRange = 300,       -- yards over which quest objective icons shrink and fade
   mk_outside = true,       -- icons sit just outside the bar instead of inside its edge
@@ -261,8 +262,11 @@ for side = 1, 2 do
   end
   for k = 1, MAX_SLICES do t.w[k] = { tex(1), tex(1), tex(1) } end
   t.glow, t.line = tex(1), tex(1)
+  t.wave = {}   -- the leading edge cut into thin slices that ripple sideways (see the wave driver below)
+  for k = 1, 12 do t.wave[k] = tex(1) end
   bf[side] = t
 end
+local waveState   -- the leading edge's layout while it ripples: { lead, xh, edge, boxes = { [side] = box } }
 local bfState   -- layout the repaint needs: { W, fw, x1, x2, lead, sides, slices = { {y1, y2, mult}... } }
 
 -- The "Fade From Top" style grows the fill down from the top edge; every other style starts at the bottom.
@@ -315,7 +319,9 @@ local function PaintBackfill(c)
     -- The leading edge is brighter than the wash, scaled with the same strength so the slider tones both.
     local glowA = math.min(1, a * 1.6 * hv)
     if st.lead == "right" then grad(t.glow, 0, glowA) else grad(t.glow, glowA, 0) end
-    t.line:SetColorTexture(r, g, b, math.min(1, c[4] * strength * 2.2 * hv))
+    local lineA = math.min(1, c[4] * strength * 2.2 * hv)
+    t.line:SetColorTexture(r, g, b, lineA)
+    for k = 1, #t.wave do t.wave[k]:SetColorTexture(r, g, b, lineA) end
   end
 end
 
@@ -325,8 +331,10 @@ local function HideBackfill()
     local t = bf[side]
     for k = 1, MAX_SLICES do for i = 1, 3 do t.w[k][i]:Hide() end end
     t.glow:Hide(); t.line:Hide()
+    for k = 1, #t.wave do t.wave[k]:Hide() end
   end
   bfState = nil
+  waveState = nil
 end
 
 -- Sizes and places the XP fill for the current XP; hides it when the XP bar is off or you are at max level.
@@ -386,6 +394,7 @@ local function LayoutBackfill(cur, mx, isMax)
   st.slices = bands
 
   bfState = st
+  waveState = nil
 
   local pieces = Pieces(st)
   local xh = (st.lead == "right") and st.x2 or st.x1
@@ -399,6 +408,7 @@ local function LayoutBackfill(cur, mx, isMax)
     if side > st.sides then
       for k = 1, MAX_SLICES do for i = 1, 3 do t.w[k][i]:Hide() end end
       t.glow:Hide(); t.line:Hide()
+      for k = 1, #t.wave do t.wave[k]:Hide() end
     else
       local function box(tx, x1, x2, y1, y2)
         tx:ClearAllPoints()
@@ -425,11 +435,42 @@ local function LayoutBackfill(cur, mx, isMax)
       else
         box(t.glow, xh, xh + hw, edge[1], edge[2]); box(t.line, xh, xh + 2, edge[1], edge[2])
       end
+      -- The ripple replaces the straight line with slices that the wave driver moves. Off: the plain line stays.
+      if db.xpWave ~= false and not st.vertical then
+        t.line:Hide()
+        waveState = waveState or { lead = st.lead, xh = xh, edge = edge, boxes = {} }
+        waveState.boxes[side] = box
+      else
+        for k = 1, #t.wave do t.wave[k]:Hide() end
+      end
     end
   end
   PaintBackfill(db.xpColor)
   return true
 end
+
+-- The wave driver: about 30 times a second each slice of the leading edge is moved a little sideways by two sine waves
+-- (one slow, one quick), so the edge ripples like the surface of a liquid. Nothing runs while the XP fill is hidden.
+-- To remove the effect, delete this block and the waveState lines above (or run /chud xpwave to turn it off).
+local waveAcc, waveT = 0, 0
+local waveFrame = CreateFrame("Frame")
+waveFrame:SetScript("OnUpdate", function(_, dt)
+  local w = waveState
+  if not w then return end
+  waveAcc = waveAcc + dt
+  if waveAcc < 0.033 then return end
+  waveT, waveAcc = waveT + waveAcc, 0
+  local y0 = w.edge[1]
+  local step = (w.edge[2] - w.edge[1]) / 12
+  for side, box in pairs(w.boxes) do
+    local t = bf[side]
+    for k = 1, 12 do
+      local off = (math.sin(waveT * 2.4 + k * 0.85) + 0.5 * math.sin(waveT * 4.1 - k * 1.7)) * 1.0
+      local a = math.max(0, w.xh + off - (w.lead == "right" and 2 or 0))
+      box(t.wave[k], a, a + 2, y0 + (k - 1) * step, y0 + k * step)
+    end
+  end
+end)
 
 local xpDemo   -- when set, XPInfo reports fake progress: { t = seconds elapsed, nextPulse = fraction }
 -- Level, current XP, XP needed and whether you are at max level (fake values while the demo runs).
@@ -546,9 +587,10 @@ local function NoteKillXP(msg)
     local fmt = COMBATLOG_XPGAIN_FIRSTPERSON or "%s dies, you gain %d experience."
     killPattern = "^" .. fmt:gsub("[%^%$%(%)%.%[%]%*%+%-%?]", "%%%0"):gsub("%%%%s", "(.+)"):gsub("%%%%d", "(%%d+)")
   end
-  local _, xp = msg:match(killPattern)
+  local who, xp = msg:match(killPattern)
   xp = tonumber(xp)
   if xp and xp > 0 then kills[#kills + 1] = { GetTime(), xp } end
+  if who and ns.NoteRareKill then ns.NoteRareKill(nil, who) end   -- a rare that gave XP counts as killed
 end
 -- Kill XP per hour over the last 10 minutes (or since the game loaded, if that is shorter), or nil until there is a kill in
 -- that time and at least a minute has passed.
@@ -885,10 +927,8 @@ function ns.ApplyBlizzXP()
       f:Show()
     end
   end
-  -- The game decides which of its tracking bars show; ask it to redo that so the XP bar returns with the right layout.
-  if not db.hideBlizzXP and StatusTrackingBarManager and StatusTrackingBarManager.UpdateBarsShown then
-    pcall(StatusTrackingBarManager.UpdateBarsShown, StatusTrackingBarManager)
-  end
+  -- (The game's own bar-layout functions are not called from here: running them from an addon taints the game's code, which
+  -- later blocks protected actions such as the Edit Mode party-frame setup.)
 end
 -- True when a default XP bar exists on this client.
 function ns.BlizzXPFound() return #BlizzXPFrames() > 0 end
@@ -1232,7 +1272,18 @@ ev:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-ev:SetScript("OnEvent", function(_, event, name)
+pcall(ev.RegisterEvent, ev, "ADDON_ACTION_BLOCKED")     -- the game tells us when an action of ours was refused, and which one
+pcall(ev.RegisterEvent, ev, "ADDON_ACTION_FORBIDDEN")
+ev:SetScript("OnEvent", function(_, event, name, ...)
+  if event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
+    if name == "CHUD" then
+      local fn = ...
+      local text = "The game blocked CHUD from calling " .. tostring(fn) .. " (" .. event .. "). " .. (debugstack and debugstack(3, 6, 0) or "")
+      print("|cffd9bf4dCHUD:|r |cffffb347" .. text .. "|r")
+      if CHUDDB then CHUDDB.lastBlocked = { at = date and date("%Y-%m-%d %H:%M:%S") or "", text = text } end
+    end
+    return
+  end
   if event == "CHAT_MSG_COMBAT_XP_GAIN" then NoteKillXP(name); return end   -- name is the chat message here
   if event ~= "ADDON_LOADED" then
     if db then CheckXPGain(); ns.UpdateXP(); UpdateInstance() end
@@ -1282,7 +1333,7 @@ end
 local COLOR_KEYS = { "bgMode", "bgOpacity", "bgSolid", "bgCenter", "bgEdge", "textColor",
   "cardinalColor", "northColor", "tickColor", "markerColor", "degreeColor", "xpColor", "outlineColor", "mk_color", "edgeColor" }
 local BEHAVIOR_KEYS = { "width", "height", "span", "fontSize", "fadeEdges", "fadeAmount",
-  "showDegrees", "degreeInline", "showIntercardinals", "showTicks", "flipTicks", "xpBar", "xpPulse", "markerStyle", "outlineWidth", "showNumbers", "edgeLines", "xpFillMode", "xpFillStyle", "xpFillStrength", "mk_size", "mk_shadowAlpha", "mk_shadowDist", "mk_native", "locked", "fontName", "fontPath", "optimize", "glitchFx" }
+  "showDegrees", "degreeInline", "showIntercardinals", "showTicks", "flipTicks", "xpBar", "xpPulse", "xpWave", "markerStyle", "outlineWidth", "showNumbers", "edgeLines", "xpFillMode", "xpFillStyle", "xpFillStrength", "mk_size", "mk_shadowAlpha", "mk_shadowDist", "mk_native", "locked", "fontName", "fontPath", "optimize", "glitchFx" }
 ns.COLOR_KEYS, ns.BEHAVIOR_KEYS = COLOR_KEYS, BEHAVIOR_KEYS   -- used by Themes.lua
 -- Resets just the listed settings to their defaults.
 local function ResetKeys(keys)
@@ -1405,6 +1456,10 @@ SlashCmdList.CHUD = function(msg)
   elseif cmd == "center" then ns.CenterHorizontal()
   elseif cmd == "reset" then ns.Reset()
   elseif cmd == "install" then if ns.RerunSetup then ns.RerunSetup() end
+  elseif cmd == "xpwave" then
+    db.xpWave = (db.xpWave == false)
+    ns.UpdateXP()
+    print("CHUD: XP edge wave " .. (db.xpWave ~= false and "on" or "off"))
   elseif cmd == "menu" then if ns.ToggleMarkerMenu then ns.ToggleMarkerMenu() end
   elseif cmd == "debug" then RunDebug(rest)
   elseif ns.categoryID then Settings.OpenToCategory(ns.categoryID)
