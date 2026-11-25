@@ -1841,7 +1841,7 @@ ev:SetScript("OnEvent", function(_, event, ...)
       if UnitIsDead and UnitIsDead("target") then
         local g = UnitGUID("target")
         if type(g) == "string" and not (issecretvalue and issecretvalue(g)) then
-          local id = tonumber(select(6, strsplit("-", g)))
+          local id = tonumber((select(6, strsplit("-", g))))
           if id then ns.NoteRareKill(id) end
         end
       end
@@ -1852,7 +1852,7 @@ ev:SetScript("OnEvent", function(_, event, ...)
     for slot = 1, (GetNumLootItems and GetNumLootItems() or 0) do
       local g = GetLootSourceInfo and GetLootSourceInfo(slot)
       if type(g) == "string" and not (issecretvalue and issecretvalue(g)) then
-        local id = tonumber(select(6, strsplit("-", g)))
+        local id = tonumber((select(6, strsplit("-", g))))
         if id then ns.NoteRareKill(id) end
       end
     end
